@@ -19,6 +19,8 @@
 
 #include "ccache.hpp"
 
+#include "ccache/irhasheval.hpp"
+
 #include <ccache/argprocessing.hpp>
 #include <ccache/args.hpp>
 #include <ccache/argsinfo.hpp>
@@ -42,6 +44,7 @@
 #include <ccache/execute.hpp>
 #include <ccache/hash.hpp>
 #include <ccache/hashutil.hpp>
+#include <ccache/irhasheval.hpp>
 #include <ccache/signalhandler.hpp>
 #include <ccache/storage/storage.hpp>
 #include <ccache/util/assertions.hpp>
@@ -82,6 +85,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -2614,6 +2618,8 @@ do_cache_compilation(Context& ctx)
     return tl::unexpected(process_args_result.error());
   }
 
+  irhasheval::OUTPUT_FILE = ctx.args_info.output_obj;
+
   TRY(set_up_uncached_err());
 
   // VS_UNICODE_OUTPUT prevents capturing stdout/stderr, as the output is sent
@@ -2702,6 +2708,7 @@ do_cache_compilation(Context& ctx)
                             ? ctx.hash_debug_files.front().get()
                             : nullptr;
 
+  irhasheval::HASH_START = irhasheval::Clock::now();
   Hash common_hash;
   init_hash_debug(ctx, common_hash, 'c', "COMMON", debug_text_file);
 
@@ -2736,11 +2743,13 @@ do_cache_compilation(Context& ctx)
     LOG_RAW("Trying direct lookup");
     const auto result_and_manifest_key = calculate_result_and_manifest_key(
       ctx, args_to_hash, direct_hash, nullptr);
+    irhasheval::HASH_END = irhasheval::Clock::now();
     if (!result_and_manifest_key) {
       return tl::unexpected(result_and_manifest_key.error());
     }
     std::tie(result_key, manifest_key) = *result_and_manifest_key;
     if (result_key) {
+      irhasheval::DIGEST = result_key;
       // If we can return from cache at this point then do so.
       const auto from_cache_result =
         from_cache(ctx, FromCacheCallMode::direct, *result_key);
@@ -2771,6 +2780,7 @@ do_cache_compilation(Context& ctx)
   }
 
   if (!ctx.config.depend_mode()) {
+    auto cpp_hash_start = irhasheval::Clock::now();
     // Find the hash using the preprocessed output. Also updates
     // ctx.included_files.
     Hash cpp_hash = common_hash;
@@ -2778,10 +2788,21 @@ do_cache_compilation(Context& ctx)
 
     const auto result_and_manifest_key = calculate_result_and_manifest_key(
       ctx, args_to_hash, cpp_hash, &process_args_result->preprocessor_args);
+
+    auto cpp_hash_end = irhasheval::Clock::now();
+    if (irhasheval::HASH_END) {
+      // We tried direct mode and use the preprocessor now, but inbetween, we
+      // didn't hash anything, so subtract that duration. This way the
+      // timestamps aren't correct anymore, but we only care about durations
+      cpp_hash_end -= cpp_hash_start - *irhasheval::HASH_END;
+    }
+    irhasheval::HASH_END = cpp_hash_end;
+
     if (!result_and_manifest_key) {
       return tl::unexpected(result_and_manifest_key.error());
     }
     result_key = result_and_manifest_key->first;
+    irhasheval::DIGEST = result_key;
 
     // calculate_result_and_manifest_key always returns a non-nullopt result_key
     // in preprocessor mode (non-nullptr last argument).
@@ -2879,6 +2900,7 @@ file_path_matches_dir_prefix_or_file(const fs::path& dir_prefix_or_file,
 int
 ccache_main(int argc, const char* const* argv)
 {
+  irhasheval::EvalGuard guard;
   try {
     if (is_ccache_executable(argv[0])) {
       if (argc < 2) {

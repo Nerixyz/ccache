@@ -13,6 +13,7 @@ set(
   language.cpp
   progressbar.cpp
   version.cpp
+  irhasheval.cpp
 )
 
 if(INODE_CACHE_SUPPORTED)

@@ -8,7 +8,7 @@ else()
 endif()
 set(CMAKE_PROJECT_DESCRIPTION "a fast C/C++ compiler cache")
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_EXTENSIONS NO)
 
@@ -106,6 +106,8 @@ add_subdirectory(src/ccache)
 #
 add_executable(ccache src/ccache/main.cpp)
 target_link_libraries(ccache PRIVATE standard_settings standard_warnings ccache_framework)
+
+add_library(compilertimer MODULE src/compilertimer.cpp)
 
 #
 # Documentation

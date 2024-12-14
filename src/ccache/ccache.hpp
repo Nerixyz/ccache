@@ -22,8 +22,10 @@
 #include <ccache/args.hpp>
 #include <ccache/config.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 

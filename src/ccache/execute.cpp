@@ -23,6 +23,7 @@
 #include <ccache/config.hpp>
 #include <ccache/context.hpp>
 #include <ccache/core/exceptions.hpp>
+#include <ccache/irhasheval.hpp>
 #include <ccache/signalhandler.hpp>
 #include <ccache/util/defer.hpp>
 #include <ccache/util/direntry.hpp>
@@ -359,6 +360,19 @@ execute(Context& ctx,
 void
 execute_noreturn(const char* const* argv, const fs::path& /*temp_dir*/)
 {
+  // XXX: I don't think we need this, since we always wait for the compiler in
+  // the cases we want to measure
+
+  // might not be set when compiling with "-o -" or when linking
+  // if (irhasheval::OUTPUT_FILE) {
+  //   const char* timer_path = std::getenv("COMPILERTIMER");
+  //   if (!timer_path) {
+  //     throw core::Fatal("COMPILERTIMER not found");
+  //   }
+  //   ::setenv("EVAL_OUTPUT_PATH", irhasheval::OUTPUT_FILE->c_str(), true);
+  //   ::setenv("LD_PRELOAD", timer_path, true);
+  //   irhasheval::flush(false);
+  // }
   execv(argv[0], const_cast<char* const*>(argv));
 }
 #endif
