@@ -2281,9 +2281,10 @@ static tl::expected<bool, Failure>
 from_cache(Context& ctx, FromCacheCallMode mode, const Hash::Digest& result_key)
 {
   // The user might be disabling cache hits.
-  if (ctx.config.recache()) {
-    return false;
-  }
+  // ... but we _do_ want to know if a file could be cached
+  // if (ctx.config.recache()) {
+  // return false;
+  // }
 
   // If we're using Clang, we can't trust a precompiled header object based on
   // running the preprocessor since clang will produce a fatal error when the
@@ -2307,10 +2308,10 @@ from_cache(Context& ctx, FromCacheCallMode mode, const Hash::Digest& result_key)
       cache_entry_data = std::move(value);
       return true;
     });
-  if (cache_entry_data.empty()) {
-    return false;
-  }
 
+  return !cache_entry_data
+            .empty(); // assume we can always retrieve the data from the cache
+  /*
   try {
     core::CacheEntry cache_entry(cache_entry_data);
     cache_entry.verify_checksum();
@@ -2332,6 +2333,7 @@ from_cache(Context& ctx, FromCacheCallMode mode, const Hash::Digest& result_key)
 
   LOG_RAW("Succeeded getting cached result");
   return true;
+  */
 }
 
 // Find the real compiler and put it into ctx.orig_args[0]. We just search the
@@ -2734,11 +2736,12 @@ do_cache_compilation(Context& ctx)
   Args args_to_hash = process_args_result->preprocessor_args;
   args_to_hash.push_back(process_args_result->extra_args_to_hash);
 
-  bool put_result_in_manifest = false;
+  [[maybe_unused]] bool put_result_in_manifest = false;
   std::optional<Hash::Digest> result_key;
   std::optional<Hash::Digest> result_key_from_manifest;
   std::optional<Hash::Digest> manifest_key;
 
+  bool had_hit = false;
   if (ctx.config.direct_mode()) {
     LOG_RAW("Trying direct lookup");
     const auto result_and_manifest_key = calculate_result_and_manifest_key(
@@ -2755,9 +2758,8 @@ do_cache_compilation(Context& ctx)
         from_cache(ctx, FromCacheCallMode::direct, *result_key);
       if (!from_cache_result) {
         return tl::unexpected(from_cache_result.error());
-      } else if (*from_cache_result) {
-        return Statistic::direct_cache_hit;
       }
+      had_hit = had_hit || (*from_cache_result);
 
       // Wasn't able to return from cache at this point. However, the result
       // was already found in manifest, so don't re-add it later.
@@ -2790,13 +2792,17 @@ do_cache_compilation(Context& ctx)
       ctx, args_to_hash, cpp_hash, &process_args_result->preprocessor_args);
 
     auto cpp_hash_end = irhasheval::Clock::now();
-    if (irhasheval::HASH_END) {
-      // We tried direct mode and use the preprocessor now, but inbetween, we
-      // didn't hash anything, so subtract that duration. This way the
-      // timestamps aren't correct anymore, but we only care about durations
-      cpp_hash_end -= cpp_hash_start - *irhasheval::HASH_END;
+    if (!had_hit) {
+      if (irhasheval::HASH_END) {
+        // We tried direct mode, didn't find anything, and use the preprocessor
+        // now, but inbetween, we didn't hash anything, so remove this part from
+        // the total hash duration. This way the timestamp isn't correct
+        // anymore, but we only use HASH_START for calculating the hashing
+        // duration
+        *irhasheval::HASH_START += cpp_hash_start - *irhasheval::HASH_END;
+      }
+      irhasheval::HASH_END = cpp_hash_end;
     }
-    irhasheval::HASH_END = cpp_hash_end;
 
     if (!result_and_manifest_key) {
       return tl::unexpected(result_and_manifest_key.error());
@@ -2834,12 +2840,15 @@ do_cache_compilation(Context& ctx)
       from_cache(ctx, FromCacheCallMode::cpp, *result_key);
     if (!from_cache_result) {
       return tl::unexpected(from_cache_result.error());
-    } else if (*from_cache_result) {
-      if (ctx.config.direct_mode() && manifest_key && put_result_in_manifest) {
-        update_manifest(ctx, *manifest_key, *result_key);
-      }
-      return Statistic::preprocessed_cache_hit;
     }
+    // we don't want to exit early and the manifest is updated either way
+    // else if (*from_cache_result) {
+    //   if (ctx.config.direct_mode() && manifest_key && put_result_in_manifest)
+    //   {
+    //     update_manifest(ctx, *manifest_key, *result_key);
+    //   }
+    //   return Statistic::preprocessed_cache_hit;
+    // }
 
     if (!ctx.config.recache()) {
       ctx.storage.local.increment_statistic(Statistic::preprocessed_cache_miss);
